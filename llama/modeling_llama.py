@@ -27,23 +27,23 @@ import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
-from ...activations import ACT2FN
-from ...modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast, SequenceClassifierOutputWithPast
-from ...modeling_utils import PreTrainedModel
-from ...pytorch_utils import ALL_LAYERNORM_LAYERS
-from ...utils import (
+from transformers.activations import ACT2FN
+from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast, SequenceClassifierOutputWithPast
+from transformers.modeling_utils import PreTrainedModel
+from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
+from transformers.utils import (
     add_start_docstrings,
     add_start_docstrings_to_model_forward,
-    is_flash_attn_available,
+    # is_flash_attn_available,
     logging,
     replace_return_docstrings,
 )
 from .configuration_llama import LlamaConfig
 
 
-if is_flash_attn_available():
-    from flash_attn import flash_attn_func, flash_attn_varlen_func
-    from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input  # noqa
+# if is_flash_attn_available():
+#     from flash_attn import flash_attn_func, flash_attn_varlen_func
+#     from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input  # noqa
 
 
 logger = logging.get_logger(__name__)
@@ -286,6 +286,13 @@ class LlamaAttention(nn.Module):
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=config.attention_bias)
         self._init_rope()
 
+        self.k_out = nn.Identity()
+        self.q_out = nn.Identity()
+        self.v_out = nn.Identity()
+        self.attn_weights = nn.Identity()
+        self.attn_out = nn.Identity()
+        self.head_out = nn.Identity()
+
     def _init_rope(self):
         if self.config.rope_scaling is None:
             self.rotary_emb = LlamaRotaryEmbedding(
@@ -359,6 +366,7 @@ class LlamaAttention(nn.Module):
             kv_seq_len += past_key_value[0].shape[-2]
         cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
+        query_states = self.q_out(query_states)
 
         if past_key_value is not None:
             # reuse k, v, self_attention
@@ -369,6 +377,8 @@ class LlamaAttention(nn.Module):
 
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
+        key_states = self.k_out(key_states)
+        value_states = self.v_out(value_states)
 
         attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
 
@@ -387,6 +397,7 @@ class LlamaAttention(nn.Module):
 
         # upcast attention to fp32
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+        attn_weights = self.attn_weights(attn_weights)
         attn_output = torch.matmul(attn_weights, value_states)
 
         if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
@@ -394,7 +405,7 @@ class LlamaAttention(nn.Module):
                 f"`attn_output` should be of size {(bsz, self.num_heads, q_len, self.head_dim)}, but is"
                 f" {attn_output.size()}"
             )
-
+        attn_output = self.head_out(attn_output)
         attn_output = attn_output.transpose(1, 2).contiguous()
 
         attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
@@ -405,6 +416,8 @@ class LlamaAttention(nn.Module):
             attn_output = sum([F.linear(attn_output[i], o_proj_slices[i]) for i in range(self.config.pretraining_tp)])
         else:
             attn_output = self.o_proj(attn_output)
+
+        attn_output = self.attn_out(attn_output)
 
         if not output_attentions:
             attn_weights = None
