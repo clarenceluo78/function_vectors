@@ -1,12 +1,16 @@
 import torch
 import numpy as np
-from transformers import AutoModelForCausalLM, AutoTokenizer, LlamaTokenizer, LlamaForCausalLM
+from transformers import AutoModelForCausalLM, AutoTokenizer, LlamaTokenizer
+import sys
+sys.path.append('/homes/hl5723/Workspace/interpretable_llm/function_vectors')
+from llama import LlamaForCausalLM
 import os
 import random
 from typing import *
 
+LLAMA2_7B_PATH = '/data2/hluo/models/llama2/models_hf/7B'
 
-def load_gpt_model_and_tokenizer(model_name:str, device='cuda'):
+def load_gpt_model_and_tokenizer(model_name:str, device='cuda', dtype=torch.float32):
     """
     Loads a huggingface model and its tokenizer
 
@@ -78,11 +82,11 @@ def load_gpt_model_and_tokenizer(model_name:str, device='cuda'):
             )
         else:
             if '7b' in model_name.lower():
-                model_dtype = torch.float32
+                model_dtype = dtype
             else: #half precision for bigger llama models
                 model_dtype = torch.float16
-            tokenizer = LlamaTokenizer.from_pretrained(model_name)
-            model = LlamaForCausalLM.from_pretrained(model_name, torch_dtype=model_dtype).to(device)
+            tokenizer = LlamaTokenizer.from_pretrained(LLAMA2_7B_PATH)
+            model = LlamaForCausalLM.from_pretrained(LLAMA2_7B_PATH, torch_dtype=model_dtype).to(device)
 
         MODEL_CONFIG={"n_heads":model.config.num_attention_heads,
                       "n_layers":model.config.num_hidden_layers,

@@ -1,5 +1,5 @@
 import os, re, json
-from tqdm import tqdm
+import tqdm
 import torch, numpy as np
 import argparse
 from baukit import TraceDict
@@ -131,15 +131,15 @@ def compute_indirect_effect(dataset, mean_activations, model, model_config, toke
     if filter_set is None:
         filter_set = np.arange(len(dataset['valid']))
     
-    for i in tqdm(range(n_trials), total=n_trials):
+    for i in tqdm.tqdm(range(n_trials), total=n_trials):
         word_pairs = dataset['train'][np.random.choice(len(dataset['train']),n_shots, replace=False)]
         word_pairs_test = dataset['valid'][np.random.choice(filter_set,n_test_examples, replace=False)]
         if prefixes is not None and separators is not None:
             prompt_data_random = word_pairs_to_prompt_data(word_pairs, query_target_pair=word_pairs_test, shuffle_labels=True, 
-                                                           prepend_bos_token=prepend_bos, prefixes=prefixes, separators=separators)
+                                                           prepend_bos_token=prepend_bos, prefixes=prefixes, separators=separators, tokenizer=tokenizer)
         else:
             prompt_data_random = word_pairs_to_prompt_data(word_pairs, query_target_pair=word_pairs_test, 
-                                                           shuffle_labels=True, prepend_bos_token=prepend_bos)
+                                                           shuffle_labels=True, prepend_bos_token=prepend_bos, tokenizer=tokenizer)
         
         ind_effects = activation_replacement_per_class_intervention(prompt_data=prompt_data_random, 
                                                                     avg_activations = mean_activations, 

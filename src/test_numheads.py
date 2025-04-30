@@ -4,6 +4,8 @@ import os
 import numpy as np
 import torch
 
+import sys
+sys.path.append('../')
 from src.utils.eval_utils import n_shot_eval, n_shot_eval_no_intervention
 from src.utils.model_utils import load_gpt_model_and_tokenizer, set_seed
 from src.utils.prompt_utils import load_dataset
@@ -14,13 +16,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--dataset_name', help="dataset to be evaluated", type=str, required=True)
-    parser.add_argument('--mean_act_root', help="root path to mean activations", type=str, required=False, default='IE_template_QA/gptj')
+    parser.add_argument('--mean_act_root', help="root path to mean activations", type=str, required=False, default='gptj')  # IE_template_QA
     parser.add_argument('--model_name', type=str, required=True, default='EleutherAI/gpt-j-6b')
     parser.add_argument('--model_nickname', type=str, required=False, default='gptj')
-    parser.add_argument('--n_heads', type=int, help="upper bound of the number of heads to create the FV", required=True, default=40)
-    parser.add_argument('--edit_layer', type=int, help="layer at which to add the function vector", required=True, default=9)
+    parser.add_argument('--n_heads', type=int, help="upper bound of the number of heads to create the FV", required=False, default=40)
+    parser.add_argument('--edit_layer', type=int, help="layer at which to add the function vector", required=False, default=9)
     parser.add_argument('--seed', required=False, type=int, default=42)
-    parser.add_argument('--save_path_root', required=True, type=str, default='../results')
+    parser.add_argument('--save_path_root', required=False, type=str, default='results')
 
     
     args = parser.parse_args()

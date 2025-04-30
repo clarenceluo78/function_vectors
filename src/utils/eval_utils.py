@@ -9,6 +9,20 @@ from .model_utils import *
 from .intervention_utils import *
 
 
+# original prediction prob - purturbed prob
+def logits_to_logit_diff(logits, purturbed_logits):
+    index = logits[0, -1].argmax()
+    logit_diff = logits[0, -1, index] - purturbed_logits[0, -1, index]
+    prob_diff = torch.softmax(logits, dim=-1)[0, -1, index] - torch.softmax(purturbed_logits, dim=-1)[0, -1, index]
+    return logit_diff, prob_diff
+
+# follow rome settings
+def prob_to_prob_diff_rome(logits, patched_logits, index):
+    logit_diff = patched_logits[0, -1, index] - logits[0, -1, index]
+    prob_diff = torch.softmax(patched_logits, dim=-1)[0, -1, index] - torch.softmax(logits, dim=-1)[0, -1, index]
+    return logit_diff, prob_diff
+
+
 def compute_top_k_accuracy(target_token_ranks, k=10) -> float:
     """
     Evaluation to compute topk accuracy.
@@ -215,9 +229,9 @@ def n_shot_eval(dataset, fv_vector, edit_layer: int, n_shots: int, model, model_
         prepend_bos = not is_llama
         if prefixes is not None and separators is not None:
             prompt_data = word_pairs_to_prompt_data(word_pairs, query_target_pair = word_pairs_test, prepend_bos_token=prepend_bos, 
-                                                    shuffle_labels=shuffle_labels, prefixes=prefixes, separators=separators)
+                                                    shuffle_labels=shuffle_labels, prefixes=prefixes, separators=separators, tokenizer=tokenizer)
         else:
-            prompt_data = word_pairs_to_prompt_data(word_pairs, query_target_pair = word_pairs_test, prepend_bos_token=prepend_bos, shuffle_labels=shuffle_labels)
+            prompt_data = word_pairs_to_prompt_data(word_pairs, query_target_pair = word_pairs_test, prepend_bos_token=prepend_bos, shuffle_labels=shuffle_labels, tokenizer=tokenizer)
             
         # Get relevant parts of the Prompt
         query, target = prompt_data['query_target']['input'], prompt_data['query_target']['output']
@@ -340,9 +354,9 @@ def n_shot_eval_no_intervention(dataset, n_shots, model, model_config, tokenizer
         word_pairs_test = dataset[test_split][j]
         if prefixes is not None and separators is not None:
             prompt_data = word_pairs_to_prompt_data(word_pairs, query_target_pair = word_pairs_test, prepend_bos_token=prepend_bos, 
-                                                    shuffle_labels=shuffle_labels, prefixes=prefixes, separators=separators)
+                                                    shuffle_labels=shuffle_labels, prefixes=prefixes, separators=separators, tokenizer=tokenizer)
         else:
-            prompt_data = word_pairs_to_prompt_data(word_pairs, query_target_pair = word_pairs_test, prepend_bos_token=prepend_bos, shuffle_labels=shuffle_labels)
+            prompt_data = word_pairs_to_prompt_data(word_pairs, query_target_pair = word_pairs_test, prepend_bos_token=prepend_bos, shuffle_labels=shuffle_labels, tokenizer=tokenizer)
             
         # Get relevant parts of the Prompt
         query, target = prompt_data['query_target']['input'], prompt_data['query_target']['output']

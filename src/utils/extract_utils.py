@@ -10,6 +10,80 @@ from .intervention_utils import *
 from .model_utils import *
 from .eval_utils import *
 
+from tqdm import tqdm
+
+
+def get_prediction_per_layer(
+    hook_model,
+    tokens,
+    pos_idx=-1,
+    target=None,
+    tokenizer=None,
+    is_plot=True,
+    return_cache=False,
+):
+    logits, cache = hook_model.run_with_cache(tokens, remove_batch_dim=True)
+    print("model output token ", logits[0, pos_idx, :].argmax(dim=-1))
+    print("model output str: ", tokenizer.decode(logits[0, pos_idx, :].argmax(dim=-1)))
+    # get the predicted token
+    if target is not None:
+        if isinstance(target, int):
+            pred_token = target
+        if isinstance(target, str):
+            pred_token = tokenizer.encode(target)[1]
+        print("target token: ", pred_token)
+        print("target str: ", tokenizer.decode(pred_token))
+    else:
+        pred_token = logits[0, :].argmax(dim=-1)[pos_idx]
+
+    norm = hook_model.ln_final
+    unembed = hook_model.unembed
+
+    # collect prob over layers for plotting
+    probs = []
+    ranks = []
+
+    for layer in range(hook_model.cfg.n_layers):
+        hs = cache[f"blocks.{layer}.hook_resid_post"][pos_idx]
+        assert len(hs) == hook_model.cfg.d_model
+
+        # add two dimensions for batch and sequence length
+        hs = hs.unsqueeze(0).unsqueeze(0)
+        hs = norm(hs)
+        proj = unembed(hs).squeeze(0).squeeze(0)
+
+        prob = torch.softmax(proj, dim=-1)
+        max_prob = prob.max().item()
+        meaning = tokenizer.decode(proj.argmax())
+        
+        target_prob = prob[pred_token].item()
+        target_rank = (prob > target_prob).sum().cpu()
+        probs.append(target_prob)
+        ranks.append(target_rank)
+        
+        print(f"Layer {layer} | output prob: {max_prob:.4f} | output meaning: {meaning} | pred prob: {target_prob:.4f} | rank: {target_rank}")
+
+    if is_plot:
+        import matplotlib.pyplot as plt
+        # use two different scales for prob and rank
+        fig, ax1 = plt.subplots()
+        ax1.plot(probs, color="blue")
+        ax1.set_ylabel("prob", color="blue")
+        ax1.tick_params(axis="y", labelcolor="blue")
+
+        ax2 = ax1.twinx()
+        ax2.plot(ranks, color="red")
+        ax2.set_ylabel("rank", color="red")
+        ax2.tick_params(axis="y", labelcolor="red")
+
+        for i in range(len(probs)):
+            plt.axvline(x=i, color="grey", linestyle="--")
+        plt.title("Prob and Rank over Layers")
+        plt.show()
+    
+    if return_cache:
+        return cache
+
 
 # Attention Activations
 def gather_attn_activations(prompt_data, layers, dummy_labels, model, tokenizer):
@@ -42,6 +116,7 @@ def gather_attn_activations(prompt_data, layers, dummy_labels, model, tokenizer)
         model(**inputs) # batch_size x n_tokens x vocab_size, only want last token prediction
 
     return td, idx_map, idx_avg
+
 
 def get_mean_head_activations(dataset, model, model_config, tokenizer, n_icl_examples = 10, N_TRIALS = 100, shuffle_labels=False, prefixes=None, separators=None, filter_set=None):
     """
@@ -80,14 +155,14 @@ def get_mean_head_activations(dataset, model, model_config, tokenizer, n_icl_exa
     is_llama = 'llama' in model_config['name_or_path']
     prepend_bos = not is_llama
 
-    for n in range(N_TRIALS):
+    for n in tqdm.tqdm(range(N_TRIALS)):
         word_pairs = dataset['train'][np.random.choice(len(dataset['train']),n_icl_examples, replace=False)]
         word_pairs_test = dataset['valid'][np.random.choice(filter_set,n_test_examples, replace=False)]
         if prefixes is not None and separators is not None:
             prompt_data = word_pairs_to_prompt_data(word_pairs, query_target_pair=word_pairs_test, prepend_bos_token=prepend_bos, 
-                                                    shuffle_labels=shuffle_labels, prefixes=prefixes, separators=separators)
+                                                    shuffle_labels=shuffle_labels, prefixes=prefixes, separators=separators, tokenizer=tokenizer)
         else:
-            prompt_data = word_pairs_to_prompt_data(word_pairs, query_target_pair=word_pairs_test, prepend_bos_token=prepend_bos, shuffle_labels=shuffle_labels)
+            prompt_data = word_pairs_to_prompt_data(word_pairs, query_target_pair=word_pairs_test, prepend_bos_token=prepend_bos, shuffle_labels=shuffle_labels, tokenizer=tokenizer)
         activations_td,idx_map,idx_avg = gather_attn_activations(prompt_data=prompt_data, 
                                                             layers = model_config['attn_hook_names'], 
                                                             dummy_labels=dummy_labels, 
@@ -132,7 +207,8 @@ def gather_layer_activations(prompt_data, layers, model, tokenizer):
 
     return td
 
-def get_mean_layer_activations(dataset, model, model_config, tokenizer, n_icl_examples = 10, N_TRIALS = 100, shuffle_labels=False, prefixes=None, separators=None, filter_set=None):
+
+def get_mean_layer_activations(dataset, model, model_config, tokenizer=None, n_icl_examples = 10, N_TRIALS = 100, shuffle_labels=False, prefixes=None, separators=None, filter_set=None):
     """
     Computes the average activations for each layer in the model, at the final predictive token.
 
@@ -165,9 +241,9 @@ def get_mean_layer_activations(dataset, model, model_config, tokenizer, n_icl_ex
         word_pairs_test = dataset['valid'][np.random.choice(filter_set,n_test_examples, replace=False)]
         if prefixes is not None and separators is not None:
             prompt_data = word_pairs_to_prompt_data(word_pairs, query_target_pair=word_pairs_test, prepend_bos_token=prepend_bos, 
-                                                    shuffle_labels=shuffle_labels, prefixes=prefixes, separators=separators)
+                                                    shuffle_labels=shuffle_labels, prefixes=prefixes, separators=separators, tokenizer=tokenizer)
         else:
-            prompt_data = word_pairs_to_prompt_data(word_pairs, query_target_pair=word_pairs_test, prepend_bos_token=prepend_bos, shuffle_labels=shuffle_labels)
+            prompt_data = word_pairs_to_prompt_data(word_pairs, query_target_pair=word_pairs_test, prepend_bos_token=prepend_bos, shuffle_labels=shuffle_labels, tokenizer=tokenizer)
         activations_td = gather_layer_activations(prompt_data=prompt_data, 
                                                   layers = model_config['layer_hook_names'], 
                                                   model=model, 
@@ -180,6 +256,64 @@ def get_mean_layer_activations(dataset, model, model_config, tokenizer, n_icl_ex
 
     mean_activations = activation_storage.mean(dim=0)
     return mean_activations
+
+
+def get_mean_attention_patterns(dataset, hook_model, tokenizer=None, layer_idx=None, head_idx=None, n_icl_examples = 3, N_TRIALS = 100, shuffle_labels=False, prefixes=None, separators=None, filter_set=None):
+    """
+    Computes the average attention patterns for each layer in the model, at the final predictive token.
+
+    Parameters: 
+    dataset: ICL dataset
+    hook_model: tl model
+    tokenizer: huggingface tokenizer
+    layer_idx: layer index to get attention patterns from
+    head_idx: head index to get attention patterns from
+    N_TRIALS: Number of in-context prompts to average over
+
+    Returns:
+    mean_activations: avg activation of each layer hidden state of the model taken across n_trials ICL prompts
+    """
+    n_test_examples = 1
+    # dummy labels for aligning the length of the inputs
+    if prefixes is not None and separators is not None:
+        dummy_labels = get_dummy_token_labels(n_icl_examples, tokenizer=tokenizer, prefixes=prefixes, separators=separators)
+    else:
+        dummy_labels = get_dummy_token_labels(n_icl_examples, tokenizer=tokenizer)
+    pattern_storage = torch.zeros(N_TRIALS, len(dummy_labels), len(dummy_labels))
+
+    if filter_set is None:
+        filter_set = np.arange(len(dataset['valid']))
+
+    for n in tqdm(range(N_TRIALS)):
+        word_pairs = dataset['train'][np.random.choice(len(dataset['train']), n_icl_examples, replace=False)]
+        word_pairs_test = dataset['valid'][np.random.choice(filter_set, n_test_examples, replace=False)]
+        
+        # get tokens
+        prompt_data = word_pairs_to_prompt_data(word_pairs, query_target_pair=word_pairs_test, prepend_bos_token=False, tokenizer=tokenizer)
+        tokens = tokenizer.encode(create_prompt(prompt_data), return_tensors='pt').to(hook_model.cfg.device)
+  
+        # get idx_map and idx_avg
+        query = prompt_data['query_target']['input']
+        token_labels, prompt_string = get_token_meta_labels(prompt_data, tokenizer, query)
+        idx_map, idx_avg = compute_duplicated_labels(token_labels, dummy_labels)
+
+        # run model with cache and get the attention pattern
+        _, cache = hook_model.run_with_cache(tokens, remove_batch_dim=True)
+        pattern = cache["pattern", layer_idx, "attn"][head_idx]  # (n_tokens, n_tokens)
+
+        pattern_filtered = pattern[list(idx_map.keys())][:,list(idx_map.keys())]
+        # # shrink the multi-token words into one token, maintain the nxn shape
+        # # this could be done by adding the attention weights of the multi-token words
+        # for (i,j) in idx_avg.values():
+        #     pattern_filtered[:,idx_map[i]] = pattern[:,i:j+1].sum(axis=1)
+        #     pattern_filtered[:,i+1:j+1] = 0
+        #     pattern_filtered[idx_map[i],:] = pattern[i:j+1,:].sum(axis=0)
+        #     pattern_filtered[i+1:j+1,:] = 0
+
+        pattern_storage[n] = pattern_filtered
+
+    mean_patterns = pattern_storage.mean(dim=0)
+    return mean_patterns
 
 # Attention Weights
 def get_value_weighted_attention(sentence, model, model_config, tokenizer, device='cuda'):
@@ -202,6 +336,7 @@ def get_value_weighted_attention(sentence, model, model_config, tokenizer, devic
     values = torch.vstack([output.past_key_values[i][1] for i in range(model_config['n_layers'])]) # (layers, heads, tokens, head_dim)
     value_weighted_attn = torch.einsum("abcd,abd->abcd", attentions, values.norm(dim=-1))
     return attentions, value_weighted_attn
+
 
 def get_token_averaged_attention(dataset, model, model_config, tokenizer, n_shots=10, storage_max=100, filter_set=None):
     """
@@ -241,7 +376,7 @@ def get_token_averaged_attention(dataset, model, model_config, tokenizer, n_shot
         prepend_bos = not is_llama
 
         word_pairs_test = dataset['valid'][s]
-        prompt_data = word_pairs_to_prompt_data(word_pairs, query_target_pair=word_pairs_test, prepend_bos_token = prepend_bos)
+        prompt_data = word_pairs_to_prompt_data(word_pairs, query_target_pair=word_pairs_test, prepend_bos_token = prepend_bos, tokenizer=tokenizer)
         
         # Get relevant parts of the Prompt
         query, target = prompt_data['query_target'].values()
@@ -274,6 +409,7 @@ def get_token_averaged_attention(dataset, model, model_config, tokenizer, n_shot
         vw_attn_storage[ind] = token_avgd_vw_attention
 
     return attn_storage, vw_attn_storage, token_labels
+
 
 def compute_function_vector(mean_activations, indirect_effect, model, model_config, n_top_heads = 10, token_class_idx=-1):
     """
@@ -334,6 +470,7 @@ def compute_function_vector(mean_activations, indirect_effect, model, model_conf
 
     return function_vector, top_heads
 
+
 def compute_universal_function_vector(mean_activations, model, model_config, n_top_heads=10):
     """
         Computes a "function vector" vector that communicates the task observed in ICL examples used for downstream intervention
@@ -361,7 +498,7 @@ def compute_universal_function_vector(mean_activations, model, model_config, n_t
                      (6, 6, 0.0069), (14, 0, 0.0068), (17, 8, 0.0068), (21, 2, 0.0067), (10, 11, 0.0066), (11, 2, 0.0057), (17, 0, 0.0054), (20, 11, 0.0051), (23, 0, 0.0047), (20, 0, 0.0046), (15, 7, 0.0045),
                      (27, 2, 0.0045), (21, 15, 0.0044), (11, 4, 0.0044), (18, 6, 0.0043), (9, 6, 0.0042), (4, 12, 0.004), (11, 15, 0.004), (20, 2, 0.0036), (10, 0, 0.0035), (16, 9, 0.0031), (11, 14, 0.0031),
                      (12, 4, 0.003), (9, 7, 0.003), (18, 3, 0.003), (19, 5, 0.003), (22, 5, 0.0027), (25, 3, 0.0026), (18, 9, 0.0025)]
-    elif 'Llama-2-7b' in model_config['name_or_path']:
+    elif 'Llama-2-7b' in model_config['name_or_path'] or 'llama2/models_hf/7B' in model_config['name_or_path']:
         top_heads = [(14, 1, 0.0391), (11, 2, 0.0225), (9, 25, 0.02), (12, 15, 0.0196), (12, 28, 0.0191), (13, 7, 0.0171), (11, 18, 0.0152), (12, 18, 0.0113), (16, 10, 0.007), (14, 16, 0.007),
                      (14, 14, 0.0048), (16, 1, 0.0042), (18, 1, 0.0042), (19, 16, 0.0041), (13, 30, 0.0034), (18, 26, 0.0032), (14, 7, 0.0032), (16, 0, 0.0031), (16, 29, 0.003), (29, 30, 0.003),
                      (16, 6, 0.0029), (15, 11, 0.0027), (12, 11, 0.0026), (11, 22, 0.0023), (16, 19, 0.0021), (15, 23, 0.002), (16, 20, 0.0019), (15, 9, 0.0019), (17, 28, 0.0019), (14, 18, 0.0018),

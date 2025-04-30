@@ -309,11 +309,11 @@ def get_dummy_token_labels(n_icl_examples, tokenizer, prefixes=None, separators=
     prepend_bos = not is_llama
     if prefixes is not None and separators is not None:
         dummy_prompt_data = word_pairs_to_prompt_data({'input': ['a']*n_icl_examples, 'output':['a']*n_icl_examples}, 
-                                                    query_target_pair={'input':['a'], 'output':['a']}, prepend_bos_token=prepend_bos,
+                                                    query_target_pair={'input':['a'], 'output':['a']}, prepend_bos_token=prepend_bos, tokenizer=tokenizer,
                                                     prefixes=prefixes, separators=separators)
     else:
         dummy_prompt_data = word_pairs_to_prompt_data({'input': ['a']*n_icl_examples, 'output':['a']*n_icl_examples}, 
-                                                  query_target_pair={'input':['a'], 'output':['a']}, prepend_bos_token=prepend_bos)
+                                                  query_target_pair={'input':['a'], 'output':['a']}, prepend_bos_token=prepend_bos, tokenizer=tokenizer)
     final_token_labels, _ = get_token_meta_labels(dummy_prompt_data,tokenizer)
     final_token_labels = [(x[0],x[-1]) for x in final_token_labels]
     return final_token_labels
@@ -357,10 +357,12 @@ def update_idx_map(idx_map, idx_avg) -> dict:
 
 def word_pairs_to_prompt_data(word_pairs : dict,
                               instructions: str = "",
+                              tokenizer=None,
                               prefixes: dict = {"input":"Q:", "output":"A:","instructions":""},
                               separators: dict = {"input":"\n", "output":"\n\n", "instructions":""},
                               query_target_pair: dict = None, prepend_bos_token=False,
-                              shuffle_labels=False, prepend_space=True) -> dict:
+                              shuffle_labels=False, prepend_space=True,
+                              model=None) -> dict:
     """Takes a dataset of word pairs, and constructs a prompt_data dict with additional information to construct an ICL prompt.
     Parameters:
     word_pairs: dict of the form {'word1':['a', 'b', ...], 'word2':['c', 'd', ...]}
@@ -379,7 +381,7 @@ def word_pairs_to_prompt_data(word_pairs : dict,
     prompt_data['instructions'] = instructions
     prompt_data['separators'] = separators
     if prepend_bos_token:
-        prefixes = {k:(v if k !='instructions' else '<|endoftext|>' + v) for (k,v) in prefixes.items()}
+        prefixes = {k:(v if k !='instructions' else tokenizer.bos_token + v) for (k,v) in prefixes.items()}
     prompt_data['prefixes'] = prefixes
 
     if query_target_pair is not None:

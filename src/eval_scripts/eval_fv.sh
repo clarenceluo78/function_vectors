@@ -1,6 +1,6 @@
 #!/bin/bash
-datasets=('antonym')
-# datasets=('antonym' 'capitalize' 'country-capital' 'english-french' 'present-past' 'singular-plural')
+# datasets=('antonym')
+datasets=('capitalize' 'country-capital' 'english-french' 'present-past' 'singular-plural')
 cd ../
 
 for d_name in "${datasets[@]}"
